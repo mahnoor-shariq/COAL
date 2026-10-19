@@ -15,6 +15,17 @@ line5 db 'String instructions help process blocks of data.', 0
 line6 db 'The viewport displays a portion of a document.', 0
 line7 db 'Search can find more than one occurrence of fox.', 0
 
+keyword db 'fox'
+keyword_len dw 3
+
+status_prefix db 'Total Matches Found: ', 0
+status_suffix db ' | Viewport Status: ACTIVE', 0
+
+match_count dw 0
+
+; Buffer for the 63 interior characters of one row.
+searchbuf times 63 db 0
+
 
 ; ============================================================
 ; MAIN PROGRAM
@@ -98,6 +109,32 @@ start:
     push word 8
     push word 3
     call scroll_window_up
+
+    ; Arguments: keyword offset, keyword length, attribute
+    push word 0CEh
+    push word [keyword_len]
+    push word keyword
+    call find_and_highlight
+
+    push word 07h
+    push word 21
+    push word 0
+    push word 23
+    push word status_prefix
+    call print_line
+
+    push word 0Eh
+    push word 21
+    push word 23
+    push word [match_count]
+    call printNum
+
+    push word 07h
+    push word 54
+    push word 22
+    push word 23
+    push word status_suffix
+    call print_line
 
     mov ax, 4C00h
     int 21h
@@ -483,3 +520,230 @@ scroll_done:
     mov sp, bp
     pop bp
     ret 10
+
+
+; ============================================================
+; find_and_highlight
+;
+; Parameters:
+;   [bp+4] = keyword offset
+;   [bp+6] = keyword length
+;   [bp+8] = highlight attribute
+;
+; Local variables:
+;   [bp-2] = current row
+;   [bp-4] = candidate position
+;
+; Each row's characters are copied into searchbuf first, because
+; CMPSB cannot skip the attribute bytes in video memory.
+; ============================================================
+
+find_and_highlight:
+    push bp
+    mov bp, sp
+    sub sp, 4
+
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    push es
+
+    mov word [match_count], 0
+
+    mov ax, [bp+6]
+    cmp ax, 0
+    je search_finished
+
+    cmp ax, 63
+    ja search_finished
+
+    mov word [bp-2], 4
+
+search_row:
+    cmp word [bp-2], 21
+    jae search_finished
+
+    mov ax, 0B800h
+    mov es, ax
+
+    mov ax, [bp-2]
+    mov bx, 160
+    mul bx
+    mov di, ax
+
+    add di, 18
+
+    mov si, searchbuf
+    mov cx, 63
+
+copy_search_row:
+    mov al, [es:di]
+    mov [si], al
+
+    add di, 2
+    inc si
+    dec cx
+
+    jnz copy_search_row
+
+    mov word [bp-4], 0
+
+search_candidate:
+    mov ax, 63
+    sub ax, [bp+6]
+
+    cmp word [bp-4], ax
+    ja search_next_row
+
+    mov si, searchbuf
+    add si, [bp-4]
+
+    push ds
+    pop es
+
+    mov di, [bp+4]
+    mov cx, [bp+6]
+
+    cld
+    repe cmpsb
+    jne search_candidate_next
+
+    inc word [match_count]
+
+    mov ax, 0B800h
+    mov es, ax
+
+    ; Attribute byte address = row*160 + (9 + candidate)*2 + 1
+    mov ax, [bp-2]
+    mov bx, 160
+    mul bx
+    mov di, ax
+
+    mov ax, [bp-4]
+    add ax, 9
+    shl ax, 1
+    add di, ax
+    inc di
+
+    mov cx, [bp+6]
+    mov al, [bp+8]
+
+highlight_match:
+    mov [es:di], al
+    add di, 2
+    dec cx
+    jnz highlight_match
+
+search_candidate_next:
+    inc word [bp-4]
+    jmp search_candidate
+
+search_next_row:
+    inc word [bp-2]
+    jmp search_row
+
+search_finished:
+    pop es
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+
+    mov sp, bp
+    pop bp
+    ret 6
+
+
+; ============================================================
+; printNum
+;
+; Parameters:
+;   [bp+4]  = unsigned integer
+;   [bp+6]  = row
+;   [bp+8]  = column
+;   [bp+10] = attribute
+;
+; Local variable:
+;   [bp-2] = number of digits
+; ============================================================
+
+printNum:
+    push bp
+    mov bp, sp
+    sub sp, 2
+
+    push ax
+    push bx
+    push cx
+    push dx
+    push di
+    push es
+
+    mov word [bp-2], 0
+
+    mov ax, [bp+4]
+    mov bx, 10
+
+    cmp ax, 0
+    jne number_convert
+
+    push word 0
+    inc word [bp-2]
+    jmp number_output
+
+number_convert:
+    xor dx, dx
+    div bx
+
+    push dx
+    inc word [bp-2]
+
+    cmp ax, 0
+    jne number_convert
+
+number_output:
+    mov ax, 0B800h
+    mov es, ax
+
+    mov ax, [bp+6]
+    mov bx, 160
+    mul bx
+    mov di, ax
+
+    mov ax, [bp+8]
+    shl ax, 1
+    add di, ax
+
+number_output_loop:
+    cmp word [bp-2], 0
+    je number_finished
+
+    pop dx
+
+    add dl, 30h
+
+    mov al, dl
+    mov ah, [bp+10]
+
+    mov [es:di], ax
+    add di, 2
+
+    dec word [bp-2]
+    jmp number_output_loop
+
+number_finished:
+    pop es
+    pop di
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+
+    mov sp, bp
+    pop bp
+    ret 8
