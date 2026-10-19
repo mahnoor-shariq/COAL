@@ -15,6 +15,19 @@ line5 db 'String instructions help process blocks of data.', 0
 line6 db 'The viewport displays a portion of a document.', 0
 line7 db 'Search can find more than one occurrence of fox.', 0
 
+; --- ADDED: extra document lines (copies of line1) so there is something to scroll in ---
+line8  db 'The quick brown fox jumps over the lazy dog.', 0
+line9  db 'The quick brown fox jumps over the lazy dog.', 0
+line10 db 'The quick brown fox jumps over the lazy dog.', 0
+line11 db 'The quick brown fox jumps over the lazy dog.', 0
+line12 db 'The quick brown fox jumps over the lazy dog.', 0
+
+; --- ADDED: table of document lines and index of next line to show ---
+doc_table dw line1,line2,line3,line4,line5,line6,line7
+          dw line8,line9,line10,line11,line12
+doc_count equ 12
+next_idx  dw 7
+
 keyword db 'fox'
 keyword_len dw 3
 
@@ -102,6 +115,15 @@ start:
     push word line7
     call print_line
 
+    ; --- CHANGED: initial highlight + status bar, then a key loop ---
+    call update_view
+
+key_loop:
+    mov ah, 0                 ; wait for a key
+    int 16h
+    cmp al, 27                ; ESC quits
+    je quit
+
     ; Arguments: top, left, bottom, right, number of rows
     push word 1
     push word 72
@@ -110,6 +132,37 @@ start:
     push word 3
     call scroll_window_up
 
+    ; print the next document line into the vacated bottom row (row 20)
+    mov bx, [next_idx]
+    cmp bx, doc_count
+    jae no_more_lines
+    shl bx, 1
+    mov ax, [doc_table + bx]
+    push word 1Fh
+    push word 61
+    push word 10
+    push word 20
+    push ax
+    call print_line
+    inc word [next_idx]
+
+no_more_lines:
+    call update_view
+    jmp key_loop
+
+quit:
+    mov ax, 0003h             ; clear screen on exit
+    int 10h
+    mov ax, 4C00h
+    int 21h
+
+
+; ============================================================
+; update_view  (ADDED)
+; Re-runs the highlighter and redraws the status bar.
+; ============================================================
+
+update_view:
     ; Arguments: keyword offset, keyword length, attribute
     push word 0CEh
     push word [keyword_len]
@@ -135,9 +188,7 @@ start:
     push word 23
     push word status_suffix
     call print_line
-
-    mov ax, 4C00h
-    int 21h
+    ret
 
 
 ; ============================================================
