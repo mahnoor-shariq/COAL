@@ -1,0 +1,329 @@
+org 100h
+jmp start
+
+; ============================================================
+; DATA
+; ============================================================
+
+title_text db 'TEXT VIEWPORT MANAGER', 0
+
+line1 db 'The quick brown fox jumps over the lazy dog.', 0
+line2 db 'Assembly language uses registers and memory.', 0
+line3 db 'The keyword fox will be highlighted on screen.', 0
+line4 db 'Scrolling moves text but preserves the border.', 0
+line5 db 'String instructions help process blocks of data.', 0
+line6 db 'The viewport displays a portion of a document.', 0
+line7 db 'Search can find more than one occurrence of fox.', 0
+
+
+; ============================================================
+; MAIN PROGRAM
+; ============================================================
+
+start:
+    push cs
+    pop ds
+
+    push word 0720h
+    call clear_screen
+
+    ; Arguments: top, left, bottom, right (pushed in reverse)
+    push word 72
+    push word 21
+    push word 8
+    push word 3
+    call draw_window
+
+    ; Arguments: string, row, column, maximum length, attribute
+    push word 1Eh
+    push word 40
+    push word 30
+    push word 4
+    push word title_text
+    call print_line
+
+    push word 1Fh
+    push word 61
+    push word 10
+    push word 5
+    push word line1
+    call print_line
+
+    push word 1Fh
+    push word 61
+    push word 10
+    push word 6
+    push word line2
+    call print_line
+
+    push word 1Fh
+    push word 61
+    push word 10
+    push word 7
+    push word line3
+    call print_line
+
+    push word 1Fh
+    push word 61
+    push word 10
+    push word 8
+    push word line4
+    call print_line
+
+    push word 1Fh
+    push word 61
+    push word 10
+    push word 9
+    push word line5
+    call print_line
+
+    push word 1Fh
+    push word 61
+    push word 10
+    push word 10
+    push word line6
+    call print_line
+
+    push word 1Fh
+    push word 61
+    push word 10
+    push word 11
+    push word line7
+    call print_line
+
+    mov ax, 4C00h
+    int 21h
+
+
+; ============================================================
+; clear_screen
+;
+; Parameter:
+;   [bp+4] = character and attribute word
+; ============================================================
+
+clear_screen:
+    push bp
+    mov bp, sp
+
+    push ax
+    push cx
+    push di
+    push es
+
+    mov ax, 0B800h
+    mov es, ax
+
+    xor di, di
+    mov ax, [bp+4]
+    mov cx, 2000
+
+    cld
+    rep stosw
+
+    pop es
+    pop di
+    pop cx
+    pop ax
+
+    pop bp
+    ret 2
+
+
+; ============================================================
+; draw_window
+;
+; Parameters:
+;   [bp+4]  = top row
+;   [bp+6]  = left column
+;   [bp+8]  = bottom row
+;   [bp+10] = right column
+;
+; Local variables:
+;   [bp-2] = current row
+;   [bp-4] = current column
+;   [bp-6] = character to draw
+; ============================================================
+
+draw_window:
+    push bp
+    mov bp, sp
+    sub sp, 6
+
+    push ax
+    push bx
+    push dx
+    push di
+    push es
+
+    mov ax, 0B800h
+    mov es, ax
+
+    mov ax, [bp+4]
+    mov [bp-2], ax
+
+draw_row:
+    mov ax, [bp+6]
+    mov [bp-4], ax
+
+draw_column:
+    mov byte [bp-6], 0CDh
+
+    mov ax, [bp-2]
+    cmp ax, [bp+4]
+    je horizontal_row
+
+    cmp ax, [bp+8]
+    je horizontal_row
+
+    mov ax, [bp-4]
+    cmp ax, [bp+6]
+    je vertical_side
+
+    cmp ax, [bp+10]
+    je vertical_side
+
+    ; Interior cell: blank with the window attribute
+    mov byte [bp-6], 20h
+    jmp write_border
+
+vertical_side:
+    mov byte [bp-6], 0BAh
+    jmp write_border
+
+horizontal_row:
+    mov ax, [bp-4]
+    cmp ax, [bp+6]
+    jne check_right_corner
+
+    ; Top-left corner
+    mov byte [bp-6], 0C9h
+
+    mov ax, [bp-2]
+    cmp ax, [bp+8]
+    jne write_border
+
+    ; Bottom-left corner
+    mov byte [bp-6], 0C8h
+    jmp write_border
+
+check_right_corner:
+    mov ax, [bp-4]
+    cmp ax, [bp+10]
+    jne write_border
+
+    ; Top-right corner
+    mov byte [bp-6], 0BBh
+
+    mov ax, [bp-2]
+    cmp ax, [bp+8]
+    jne write_border
+
+    ; Bottom-right corner
+    mov byte [bp-6], 0BCh
+
+write_border:
+    mov ax, [bp-2]
+    mov bx, 160
+    mul bx
+    mov di, ax
+
+    mov ax, [bp-4]
+    shl ax, 1
+    add di, ax
+
+    mov al, [bp-6]
+    mov ah, 1Fh
+    mov [es:di], ax
+
+next_column:
+    inc word [bp-4]
+
+    mov ax, [bp-4]
+    cmp ax, [bp+10]
+    jbe draw_column
+
+    inc word [bp-2]
+
+    mov ax, [bp-2]
+    cmp ax, [bp+8]
+    jbe draw_row
+
+    pop es
+    pop di
+    pop dx
+    pop bx
+    pop ax
+
+    mov sp, bp
+    pop bp
+    ret 8
+
+
+; ============================================================
+; print_line
+;
+; Parameters:
+;   [bp+4]  = string offset
+;   [bp+6]  = row
+;   [bp+8]  = column
+;   [bp+10] = maximum number of characters
+;   [bp+12] = attribute
+; ============================================================
+
+print_line:
+    push bp
+    mov bp, sp
+
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    push es
+
+    mov ax, 0B800h
+    mov es, ax
+
+    mov si, [bp+4]
+
+    mov ax, [bp+6]
+    mov bx, 160
+    mul bx
+    mov di, ax
+
+    mov ax, [bp+8]
+    shl ax, 1
+    add di, ax
+
+    mov cx, [bp+10]
+    mov ah, [bp+12]
+
+    cld
+
+print_line_loop:
+    cmp cx, 0
+    je print_line_done
+
+    lodsb
+
+    cmp al, 0
+    je print_line_done
+
+    stosw
+    dec cx
+
+    jmp print_line_loop
+
+print_line_done:
+    pop es
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+
+    pop bp
+    ret 10
