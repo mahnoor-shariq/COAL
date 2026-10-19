@@ -91,6 +91,14 @@ start:
     push word line7
     call print_line
 
+    ; Arguments: top, left, bottom, right, number of rows
+    push word 1
+    push word 72
+    push word 21
+    push word 8
+    push word 3
+    call scroll_window_up
+
     mov ax, 4C00h
     int 21h
 
@@ -325,5 +333,153 @@ print_line_done:
     pop bx
     pop ax
 
+    pop bp
+    ret 10
+
+
+; ============================================================
+; scroll_window_up
+;
+; Parameters:
+;   [bp+4]  = top border row
+;   [bp+6]  = left border column
+;   [bp+8]  = bottom border row
+;   [bp+10] = right border column
+;   [bp+12] = number of rows to scroll
+;
+; Local variables:
+;   [bp-2] = effective scroll amount
+;   [bp-4] = destination row
+;   [bp-6] = last destination row
+;
+; Title row (top+1) is kept; rows top+2 to bottom-1 are scrolled.
+; ============================================================
+
+scroll_window_up:
+    push bp
+    mov bp, sp
+    sub sp, 6
+
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    push es
+
+    mov ax, 0B800h
+    mov es, ax
+
+    ; Scrollable height = bottom - top - 2
+    mov ax, [bp+8]
+    sub ax, [bp+4]
+    sub ax, 2
+
+    cmp ax, 0
+    jle scroll_done
+
+    ; Effective scroll amount = min(N, height)
+    mov bx, [bp+12]
+    cmp bx, ax
+    jbe scroll_amount_valid
+
+    mov bx, ax
+
+scroll_amount_valid:
+    mov [bp-2], bx
+
+    mov ax, [bp+4]
+    add ax, 2
+    mov [bp-4], ax
+
+    ; Last destination row = bottom - 1 - N
+    mov ax, [bp+8]
+    dec ax
+    sub ax, [bp-2]
+    mov [bp-6], ax
+
+scroll_copy_row:
+    mov ax, [bp-4]
+    cmp ax, [bp-6]
+    ja scroll_blank_start
+
+    add ax, [bp-2]
+
+    mov bx, 160
+    mul bx
+    mov si, ax
+
+    mov ax, [bp+6]
+    inc ax
+    shl ax, 1
+    add si, ax
+
+    mov ax, [bp-4]
+    mov bx, 160
+    mul bx
+    mov di, ax
+
+    mov ax, [bp+6]
+    inc ax
+    shl ax, 1
+    add di, ax
+
+    mov cx, [bp+10]
+    sub cx, [bp+6]
+    dec cx
+
+    ; MOVSW reads from DS:SI, so DS must point to video memory here
+    push ds
+    mov ax, 0B800h
+    mov ds, ax
+    cld
+    rep movsw
+    pop ds
+
+    inc word [bp-4]
+    jmp scroll_copy_row
+
+scroll_blank_start:
+    mov ax, [bp+8]
+    sub ax, [bp-2]
+    mov [bp-4], ax
+
+scroll_blank_row:
+    mov ax, [bp-4]
+    cmp ax, [bp+8]
+    jae scroll_done
+
+    mov bx, 160
+    mul bx
+    mov di, ax
+
+    mov ax, [bp+6]
+    inc ax
+    shl ax, 1
+    add di, ax
+
+    mov ax, 1F20h
+
+    mov cx, [bp+10]
+    sub cx, [bp+6]
+    dec cx
+
+    cld
+    rep stosw
+
+    inc word [bp-4]
+    jmp scroll_blank_row
+
+scroll_done:
+    pop es
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+
+    mov sp, bp
     pop bp
     ret 10
